@@ -31,12 +31,12 @@ def make_ports(ports_string)
     udp = port_string.end_with?("/udp")
     port_string.gsub!(%r{/udp$}, '')
 
-    incoming, outgoing = port_string.split("/")
+    incoming, outgoing = port_string.split(":")
     outgoing ||= incoming
 
     {
-      incoming: incoming,
-      outgoing: outgoing,
+      incoming: incoming.to_i,
+      outgoing: outgoing.to_i,
       udp: udp
     }
   end
@@ -45,7 +45,7 @@ end
 service = {
   name: parser[:name],
   image: parser[:image],
-  ports: make_ports(parser[:ports] || "")
+  ports: make_ports(parser[:ports] || ""),
   tags: parser.fetch(:tags, "").split(",").map(&:strip)
 }
 
