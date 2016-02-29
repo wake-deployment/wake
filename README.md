@@ -1,55 +1,82 @@
-# wake deploys
+# Wake
 
-Wake packages, deploys, and manages applications and application
-environemnts.
+Wake packages, deploys, manages and orchestrates applications and application environments.
+
+## Wake vs. Other Infrastructure Frameworks
+
+Wake is an end-to-end solution for managing applications and application
+environments from version control commit to running in production. Wake uses
+other pluggable infrastructure frameworks such as Kubernetes or Docker Swarm
+to power many of its features. In addition to the functionality that these
+frameworks provide, wake also offers other pluggable abstractions over IaaS
+providers, logging, and other common infrastructure needs.
 
 # Prereqs
 
 * docker
 * docker-machine
 
-_NOTE: On Windows, you'll need to ensure that OpenSSL has access to a certificate 
+_NOTE: On Windows, you'll need to ensure that OpenSSL has access to a certificate
 authority bundle.  Download the [Mozilla Certificat bundle](https://raw.githubusercontent.com/bagder/ca-bundle/master/ca-bundle.crt)
 locally, and set the `SSL_CERT_FILE` environment variable to reference this file._
 
 You may also want to add wake's bin directory to your path for ease of use.
 
-## Azure
-
-* Service principal is created and has the correct roles
-
-_NOTE: There will be a tool to help setup a service principal
-eventually. In the meantime please consult the azure ruby sdk README
-for the most up to date information._
-
 # Terms
 
-**host**: a virtual server running a docker host
+**cluster**: a collection of nodes (hosts) managed together as a unit
 
-**host image**: a virtual server disk image pre-setup and ready to run
-services
+**node**: a host in the cluster
 
-**node**: a host that is registered into consul
+**process**: the smallest unit of work (e.g. a web server or background job)
 
-**cluster**: is a collection of hosts/nodes managed together as a unit
+**application**: is a list of related processes defined by a `manifest.json`
 
-**application**: is a list of processes defined by a `manifest.json` and
-stored in a git repo
+**service**: is the collection of all running instances of a process
 
-**service**: is a running application process hosted in a container on
-a host in a cluster and registered in consul
+# Concepts
 
-**container**: a running docker container on a host for a service
+wake is broken up into these concepts:
 
-**container-image**: a fetchable docker image compiled and ready to run
+**cli**: implimentation of the command line interface
 
-# WTF???
+**build**: responsible for building and pushing docker images and for
+creating build pipelines
 
-Wake packages application's processes into containers which can be
-deployed into a cluster as a service. Wake uses consul to keep track of
-nodes and services in a cluster. Basically a cluster is a consul master
-with 0 or more registered nodes and 0 more registered services on those
-nodes.
+**iaas**: libraries for different iaas providers that expose a unified
+interface
+
+**infrastructure**: commands for interacting with iaas actions and
+security of vms
+
+**secrets**: implementations for different stores for securely getting
+and setting application secrets
+
+**orchestration**: libraries for different orchestration frameworks like
+kubernetes and swarm
+
+## Orchestration
+
+Required features for an orchestration framework are:
+
+* anti-affinity: two processes of the same application shouldn't be on
+  the same vm
+* dns:
+    * master nodes should be registered in dns for easy discovery
+    * services should be auto-addressable by dns names
+* load balancing (internal and external)
+* upgrade deployment strategy (replace/rollback)
+
+# Opinions
+
+wake is opinionated about:
+
+* immutable infrastructure
+* cluster bootstrap and scaling with iaas cli/http apis
+* log aggregation
+* secrets management
+* ssh access
+* building docker images
 
 # CLI conventions
 
@@ -63,53 +90,18 @@ Every command supports these three flags:
 
 # Cluster
 
-A cluster is a collection of hosts (nodes) and application processess
-(services).  A cluster has one consul database which is used to store
-and validate the details of the cluster. Which apps should be runing
-where, how many nodes there are, and all other cluster related questions
-should be answerable from the consul database.
-
-The consul database is also used to store secrets that are injected in
-the env of a service during boot.
+A cluster is a logical collection of nodes.
 
 Clusters are kept track of in `~/.wake/clusters` and can be managed with
-the `wake clusters` command. Joining a cluster is as easy as finding the
-IP of the ssh proxy and having permission to send commands and queries
-to it.
+the `wake clusters` command.
 
 ## Create a cluster
 
 ```sh
-$ wake clusters create --name wake-test-1 --iaas azure --location eastus --default
+$ wake clusters create --name wake-test-1 --iaas azure --location eastus --orchestrator kubernetes
 ```
 
 _NOTE: azure is the only supported IaaS provider at this time._
-
-This will:
-
-1. create a resource group
-2. create a storage account
-3. create a vnet
-4. create a subnet
-5. create three host images
-6. create three consul servers
-7. create one ssh proxy with a public ip address and record it to the
-   local clusters file
-8. set this cluster as the default cluster
-
-- - -
-
-_NOTE: Everything after here is not finished._
-
-- create awake public ip
-- launch logstash vm
-- launch graphite vm
-- launch rsyslog vm
-- launch awake vm
-- ...
-
-_NOTE: this is not finalized yet, but it's a good idea of where we are
-going._
 
 ## List known clusters
 
@@ -137,64 +129,13 @@ _NOTE: `wake-clusters-delete` will ask you to confirm the name of the
 cluster before proceeding. It's possible to pass `--pre-confirm` with
 the name again to prevent the confirmation prompt._
 
-# Environments
-
-There are no environments with wake. Make a new cluster with a different
-name.
-
-# Hosts
-
-## Create a new bare host from ubuntu
-
-```sh
-$ wake hosts create --bare --name test-host-1
-```
-
-## Create a new host using the default host image for a cluster
-
-For the default cluster:
-
-```sh
-$ wake hosts create --name test-host-1
-```
-
-For a specific cluster:
-
-```sh
-$ wake hosts create --name test-host-1 --cluster other-cluster
-```
-
-Wake will actually provide a random name for you if you like:
-
-```sh
-$ wake hosts create
-```
-
-To connect to a host after it's created:
-
-```sh
-$ wake hosts create --connect
-```
-
-## Connecting to a host
-
-To connect to a host by it's name:
-
-```sh
-$ wake hosts connect -n test-host-1
-```
-
-To run a command on a host:
-
-```sh
-$ wake hosts run -n test-host-1 -c 'uptime'
-```
+> *Environments*
+>
+> There are no environments with wake. Make a new cluster with a different name.
 
 # Application conventions
 
-* Every process must listen on port 8000 for `/_health`
-* Every app must declare it's dependencies so the proxy container on the
-  host will fill in the correct ips and dns
+**Every process must listen on port 8000 for `/_health`**
 
 # `manifest.json`
 
@@ -239,42 +180,33 @@ Here are some examples:
 }
 ```
 
-# Containers
+# docker images
 
-We build the docker containers by going through a few steps:
+wake is opinionated about how docker images are created. wake includes
+pre-built `Dockerfile`s for different platforms. If your project does
+not include a `Dockerfile` then one will be provided during build.
 
-1. Detect the platform type
-2. Build platfrom-compile container
-3. For each process, use a process-application-compile < platform-compile container to:
-   1. Compile a binary of the application process into /tmp/app.gz
-   2. Render a Dockerfile that inherits from the application-release
-   3. Build process-application-release:sha
-   4. Extract /tmp/app.gz into the final container as /opt/app/*
-   5. Copy /tmp/run to /opt/run
-
-Yes, we build the final process-application-release:sha container inside
-the process-application-compile one. This means that our compiled app is
-compiled in linux and packaged up in linux. It also means it's easy to
-copy files into the final container with simple ADD's and stuff like
-that.
-
-_NOTE: **Current status**: only creating the process-application-compile
-container. We will eventually create the -release one, but it is
-currently not a priority._
-
-## OK, what's the command to build a container?
-
-First change into the application's directory where the `manifest.json`
-is, then:
+To build and push a docker image:
 
 ```sh
-$ wake containers create -r b5aedadd
+$ cd path/to/project
+$ wake build
 ```
 
-If you want to push your containers to your docker hub organization,
-first create the repo over on docker hub, then append `--push`:
+To build an image for a certain commit then specify the sha or branch:
 
 ```sh
-$ wake containers create -r $(git rev-parse --verify HEAD | cut -c1-9) --push
+$ wake build -r b5aedadd
 ```
 
+# Deploy
+
+Images are deployed with `wake deploy`.
+
+# Scaling
+
+Services are scaled with `wake scale`.
+
+# Secrets
+
+Secrets are configured with `wake secrets`.
